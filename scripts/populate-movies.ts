@@ -25,23 +25,27 @@ async function populateDatabase() {
       }
 
       try {
-        // If we only have basic info, enrich with full details
+        // Always enrich with full details from IMDb to get poster, description, and cast
         let movieData = movie
-        if (!movie.description || !movie.director || !movie.cast) {
-          console.log(`Enriching ${movie.title}...`)
-          const enriched = await scrapeIMDb(movie.imdbId)
-          if (enriched) {
-            movieData = {
-              ...movie,
-              ...enriched,
-              // Keep original data if enriched doesn't have it
-              title: enriched.title || movie.title,
-              releaseDate: enriched.releaseDate || movie.releaseDate,
-            }
+        console.log(`Enriching ${movie.title} with full details (poster, description, cast)...`)
+        const enriched = await scrapeIMDb(movie.imdbId)
+        if (enriched) {
+          movieData = {
+            ...movie,
+            ...enriched,
+            // Prefer enriched data, but keep original if enriched doesn't have it
+            title: enriched.title || movie.title,
+            releaseDate: enriched.releaseDate || movie.releaseDate,
+            posterUrl: enriched.posterUrl || movie.posterUrl,
+            description: enriched.description || movie.description,
+            director: enriched.director || movie.director,
+            cast: enriched.cast && enriched.cast.length > 0 ? enriched.cast : movie.cast,
+            genres: enriched.genres && enriched.genres.length > 0 ? enriched.genres : movie.genres,
+            runtime: enriched.runtime || movie.runtime,
           }
-          // Delay to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 1500))
         }
+        // Delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 1500))
 
         // Save to database
         const savedMovie = await prisma.movie.upsert({

@@ -15,47 +15,29 @@ export interface MovieData {
 }
 
 /**
- * Scrapes movie data from IMDb
+ * Scrapes movie data from IMDb with full details including poster, description, and cast
  */
 export async function scrapeIMDb(imdbId: string): Promise<MovieData | null> {
   try {
     const url = `https://www.imdb.com/title/${imdbId}/`
     const response = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      timeout: 30000,
     })
 
     const $ = cheerio.load(response.data)
     
-    const title = $('h1[data-testid="hero-title-block__title"]').text().trim()
-    const releaseDateText = $('a[href*="releaseinfo"]').first().text().trim()
-    const director = $('a[href*="/name/"]').first().text().trim()
-    const description = $('span[data-testid="plot-xl"]').text().trim() || 
-                       $('span[data-testid="plot-l"]').text().trim()
-    const posterUrl = $('img[data-testid="hero-image__poster"]').attr('src') || 
-                     $('img.ipc-image').first().attr('src')
+    // Extract title
+    const title = $('h1[data-testid="hero-title-block__title"]').text().trim() ||
+                  $('h1.ipc-title__text').first().text().trim()
     
-    // Extract genres
-    const genres: string[] = []
-    $('a[href*="/search/title?genres="]').each((_, el) => {
-      const genre = $(el).text().trim()
-      if (genre) genres.push(genre)
-    })
-
-    // Extract cast
-    const cast: string[] = []
-    $('a[data-testid="title-cast-item__actor"]').each((_, el) => {
-      const actor = $(el).text().trim()
-      if (actor) cast.push(actor)
-    })
-
-    // Extract runtime
-    const runtimeText = $('li[data-testid="title-techspec_runtime"]').find('div').last().text().trim()
-    const runtimeMatch = runtimeText.match(/(\d+)/)
-    const runtime = runtimeMatch ? parseInt(runtimeMatch[1]) : undefined
-
-    // Parse release date
+    // Extract release date
+    const releaseDateText = $('a[href*="releaseinfo"]').first().text().trim() ||
+                           $('span[data-testid="title-details-releasedate"]').find('a').first().text().trim()
     let releaseDate: Date | undefined
     if (releaseDateText) {
       const dateMatch = releaseDateText.match(/(\d{4})/)
@@ -63,6 +45,87 @@ export async function scrapeIMDb(imdbId: string): Promise<MovieData | null> {
         releaseDate = new Date(parseInt(dateMatch[1]), 0, 1)
       }
     }
+
+    // Extract director (try multiple selectors)
+    const director = $('a[href*="/name/"][href*="/?ref_=tt_ov_dr"]').first().text().trim() ||
+                    $('li[data-testid="title-pc-principal-credit"]').first().find('a').first().text().trim() ||
+                    $('div.ipc-metadata-list-item__content-container').first().find('a').first().text().trim()
+    
+    // Extract description (plot/summary) - try multiple selectors
+    const description = $('span[data-testid="plot-xl"]').text().trim() || 
+                       $('span[data-testid="plot-l"]').text().trim() ||
+                       $('span[data-testid="plot"]').text().trim() ||
+                       $('div[data-testid="plot"]').find('span').first().text().trim() ||
+                       $('.ipc-html-content-inner-div').first().text().trim()
+    
+    // Extract poster image - get high quality version
+    let posterUrl = $('img[data-testid="hero-image__poster"]').attr('src') || 
+                   $('img.ipc-image').first().attr('src')
+    
+    // Try to get higher quality poster from meta tags
+    if (!posterUrl || posterUrl.includes('nopicture')) {
+      posterUrl = $('meta[property="og:image"]').attr('content') ||
+                 $('link[rel="image_src"]').attr('href')
+    }
+    
+    // Convert to higher quality if it's a small thumbnail
+    if (posterUrl) {
+      // Replace thumbnail sizes with larger sizes
+      posterUrl = posterUrl.replace(/._V1_.*\.jpg/, '._V1_SX3000.jpg')
+                          .replace(/._V1_UX.*\.jpg/, '._V1_SX3000.jpg')
+                          .replace(/._V1_UY.*\.jpg/, '._V1_SX3000.jpg')
+    }
+    
+    // Extract genres
+    const genres: string[] = []
+    $('a[href*="/search/title?genres="]').each((_, el) => {
+      const genre = $(el).text().trim()
+      if (genre && !genres.includes(genre)) genres.push(genre)
+    })
+    
+    // Also try alternative genre selectors
+    if (genres.length === 0) {
+      $('span[data-testid="storyline-genres"]').find('a').each((_, el) => {
+        const genre = $(el).text().trim()
+        if (genre && !genres.includes(genre)) genres.push(genre)
+      })
+    }
+
+    // Extract cast (actors) - get top cast members
+    const cast: string[] = []
+    // Try the main cast section
+    $('a[data-testid="title-cast-item__actor"]').each((_, el) => {
+      const actor = $(el).text().trim()
+      if (actor && !cast.includes(actor) && cast.length < 20) {
+        cast.push(actor)
+      }
+    })
+    
+    // Also try alternative cast selectors if the first didn't work
+    if (cast.length === 0) {
+      $('div[data-testid="title-cast-item"]').each((_, el) => {
+        const actor = $(el).find('a').first().text().trim()
+        if (actor && !cast.includes(actor) && cast.length < 20) {
+          cast.push(actor)
+        }
+      })
+    }
+    
+    // Try the cast list section
+    if (cast.length === 0) {
+      $('table.cast_list').find('td.primary_photo + td a').each((_, el) => {
+        const actor = $(el).text().trim()
+        if (actor && !cast.includes(actor) && cast.length < 20) {
+          cast.push(actor)
+        }
+      })
+    }
+
+    // Extract runtime
+    const runtimeText = $('li[data-testid="title-techspec_runtime"]').find('div').last().text().trim() ||
+                       $('time').attr('datetime')
+    const runtimeMatch = runtimeText?.match(/(\d+)/)
+    const runtime = runtimeMatch ? parseInt(runtimeMatch[1]) : undefined
 
     return {
       title,
@@ -75,8 +138,8 @@ export async function scrapeIMDb(imdbId: string): Promise<MovieData | null> {
       cast,
       runtime,
     }
-  } catch (error) {
-    console.error('Error scraping IMDb:', error)
+  } catch (error: any) {
+    console.error(`Error scraping IMDb ${imdbId}:`, error.message)
     return null
   }
 }

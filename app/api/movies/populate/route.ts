@@ -30,21 +30,26 @@ export async function POST(request: NextRequest) {
           }
 
           try {
-            // Enrich with full details if needed
+            // Always enrich with full details from IMDb to get poster, description, and cast
             let movieData = movie
-            if (!movie.description || !movie.director) {
-              const enriched = await scrapeIMDb(movie.imdbId)
-              if (enriched) {
-                movieData = {
-                  ...movie,
-                  ...enriched,
-                  title: enriched.title || movie.title,
-                  releaseDate: enriched.releaseDate || movie.releaseDate,
-                }
+            const enriched = await scrapeIMDb(movie.imdbId)
+            if (enriched) {
+              movieData = {
+                ...movie,
+                ...enriched,
+                // Prefer enriched data, but keep original if enriched doesn't have it
+                title: enriched.title || movie.title,
+                releaseDate: enriched.releaseDate || movie.releaseDate,
+                posterUrl: enriched.posterUrl || movie.posterUrl,
+                description: enriched.description || movie.description,
+                director: enriched.director || movie.director,
+                cast: enriched.cast && enriched.cast.length > 0 ? enriched.cast : movie.cast,
+                genres: enriched.genres && enriched.genres.length > 0 ? enriched.genres : movie.genres,
+                runtime: enriched.runtime || movie.runtime,
               }
-              // Small delay to avoid rate limiting
-              await new Promise(resolve => setTimeout(resolve, 1000))
             }
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 1500))
 
             await prisma.movie.upsert({
               where: { imdbId: movie.imdbId },
