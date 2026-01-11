@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "populate-movies": "tsx scripts/populate-movies.ts",
-    "populate-from-list": "tsx scripts/populate-from-list.ts"
+    "populate-from-list": "tsx scripts/populate-from-list.ts",
+    "monitor-scraper": "tsx scripts/monitor-scraper.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
