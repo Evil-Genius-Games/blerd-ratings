@@ -1,5 +1,6 @@
 import axios from 'axios'
 import * as cheerio from 'cheerio'
+import puppeteer from 'puppeteer'
 
 export interface MovieData {
   title: string
@@ -227,32 +228,56 @@ export async function scrapeRecentMovies(): Promise<MovieData[]> {
 }
 
 /**
- * Scrapes movies by year from IMDb's advanced search
+ * Scrapes movies by year from IMDb's advanced search using Puppeteer
  */
 export async function scrapeMoviesByYear(year: number, maxPages: number = 10): Promise<MovieData[]> {
   const movies: MovieData[] = []
+  let browser: any = null
   
   try {
+    // Launch browser for JavaScript-rendered pages
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    })
+
     for (let page = 1; page <= maxPages; page++) {
       try {
         // IMDb advanced search URL for movies by year
         const url = `https://www.imdb.com/search/title/?title_type=feature&release_date=${year}-01-01,${year}-12-31&sort=num_votes,desc&start=${(page - 1) * 50 + 1}`
         
-        const response = await axios.get(url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-          },
-          timeout: 30000,
-        })
-
-        const $ = cheerio.load(response.data)
+        const pageObj = await browser.newPage()
+        await pageObj.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        await pageObj.goto(url, { waitUntil: 'networkidle2', timeout: 30000 })
         
-        // Check if we've reached the end
-        const results = $('div.lister-item')
+        // Wait for content to load
+        await pageObj.waitForSelector('div.lister-item, div.ipc-metadata-list-summary-item, div.ipc-title-link-wrapper', { timeout: 10000 }).catch(() => {})
+        
+        const html = await pageObj.content()
+        await pageObj.close()
+
+        const $ = cheerio.load(html)
+        
+        // Check if we've reached the end - try multiple selectors
+        let results = $('div.lister-item')
+        if (results.length === 0) {
+          // Try alternative selector
+          results = $('div[class*="lister-item"]')
+        }
+        if (results.length === 0) {
+          // Try ipc-metadata-list-item
+          results = $('div.ipc-metadata-list-summary-item')
+        }
+        if (results.length === 0) {
+          // Try ipc-title-link-wrapper
+          results = $('div.ipc-title-link-wrapper')
+        }
+        
         if (results.length === 0) {
           console.log(`No more results for year ${year}, page ${page}`)
+          // Debug: log a snippet of the HTML to see what we're getting
+          const bodyText = $('body').text().substring(0, 500)
+          console.log(`Page content preview: ${bodyText}...`)
           break
         }
 
@@ -326,33 +351,82 @@ export async function scrapeMoviesByYear(year: number, maxPages: number = 10): P
     }
   } catch (error) {
     console.error(`Error scraping movies for year ${year}:`, error)
+  } finally {
+    if (browser) {
+      await browser.close()
+    }
   }
 
   return movies
 }
 
 /**
- * Scrapes movies from the last N years
+ * Scrapes movies from the last N years using TMDB API (more reliable than scraping)
+ * Falls back to IMDb scraping if TMDB API key is not available
  */
-export async function scrapeMoviesLastNYears(years: number = 5): Promise<MovieData[]> {
+export async function scrapeMoviesLastNYears(years: number = 5, tmdbApiKey?: string): Promise<MovieData[]> {
   const currentYear = new Date().getFullYear()
   const startYear = currentYear - years
   const allMovies: MovieData[] = []
 
   console.log(`Starting to scrape movies from ${startYear} to ${currentYear}`)
 
-  for (let year = startYear; year <= currentYear; year++) {
-    console.log(`\n=== Scraping movies from year ${year} ===`)
-    const yearMovies = await scrapeMoviesByYear(year, 20) // Get up to 20 pages per year (1000 movies)
-    allMovies.push(...yearMovies)
-    console.log(`Found ${yearMovies.length} movies for year ${year}`)
-    
-    // Longer delay between years
-    if (year < currentYear) {
-      await new Promise(resolve => setTimeout(resolve, 5000))
+  // If TMDB API key is available, use it (much more reliable)
+  if (tmdbApiKey) {
+    console.log('Using TMDB API for movie data...')
+    for (let year = startYear; year <= currentYear; year++) {
+      console.log(`\n=== Fetching movies from year ${year} via TMDB ===`)
+      try {
+        // Get popular movies for the year
+        for (let page = 1; page <= 10; page++) {
+          const response = await axios.get('https://api.themoviedb.org/3/discover/movie', {
+            params: {
+              api_key: tmdbApiKey,
+              primary_release_year: year,
+              sort_by: 'popularity.desc',
+              page: page,
+            },
+          })
+
+          const movies = response.data.results.map((movie: any) => ({
+            title: movie.title,
+            releaseDate: movie.release_date ? new Date(movie.release_date) : undefined,
+            description: movie.overview,
+            posterUrl: movie.poster_path 
+              ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` 
+              : undefined,
+            tmdbId: movie.id,
+            genres: [], // Will be enriched later
+          }))
+
+          allMovies.push(...movies)
+          console.log(`Fetched ${movies.length} movies from TMDB for ${year}, page ${page}`)
+          
+          if (page >= response.data.total_pages) break
+          
+          // Rate limiting
+          await new Promise(resolve => setTimeout(resolve, 250))
+        }
+      } catch (error: any) {
+        console.error(`Error fetching from TMDB for year ${year}:`, error.message)
+      }
+    }
+  } else {
+    // Fallback to IMDb scraping
+    console.log('TMDB API key not found, using IMDb scraping (may be slower/less reliable)...')
+    for (let year = startYear; year <= currentYear; year++) {
+      console.log(`\n=== Scraping movies from year ${year} ===`)
+      const yearMovies = await scrapeMoviesByYear(year, 5) // Reduced pages for reliability
+      allMovies.push(...yearMovies)
+      console.log(`Found ${yearMovies.length} movies for year ${year}`)
+      
+      // Longer delay between years
+      if (year < currentYear) {
+        await new Promise(resolve => setTimeout(resolve, 5000))
+      }
     }
   }
 
-  console.log(`\nTotal movies scraped: ${allMovies.length}`)
+  console.log(`\nTotal movies found: ${allMovies.length}`)
   return allMovies
 }

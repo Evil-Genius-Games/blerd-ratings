@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import { scrapeMoviesLastNYears, scrapeIMDb } from '../lib/scraper'
 import { prisma } from '../lib/prisma'
 
@@ -6,7 +7,9 @@ async function populateDatabase() {
   
   try {
     // Scrape movies from the last 5 years
-    const movies = await scrapeMoviesLastNYears(5)
+    // Try to use TMDB API if available, otherwise fall back to IMDb scraping
+    const tmdbApiKey = process.env.TMDB_API_KEY
+    const movies = await scrapeMoviesLastNYears(5, tmdbApiKey)
     
     console.log(`\nScraping complete. Found ${movies.length} movies.`)
     console.log('Now enriching with detailed data and saving to database...\n')

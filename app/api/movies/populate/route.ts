@@ -9,7 +9,9 @@ export async function POST(request: NextRequest) {
     console.log(`Starting to populate database with movies from last ${years} years...`)
 
     // Scrape movies from the last N years
-    const movies = await scrapeMoviesLastNYears(years)
+    // Try to use TMDB API if available, otherwise fall back to IMDb scraping
+    const tmdbApiKey = process.env.TMDB_API_KEY
+    const movies = await scrapeMoviesLastNYears(years, tmdbApiKey)
     
     console.log(`Found ${movies.length} movies. Saving to database...`)
 
