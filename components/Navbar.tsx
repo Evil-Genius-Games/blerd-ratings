@@ -26,6 +26,12 @@ export function Navbar() {
                 >
                   Movies
                 </Link>
+                <Link
+                  href="/admin/populate"
+                  className="text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  Populate DB
+                </Link>
                 <span className="text-gray-700 dark:text-gray-300">
                   {session.user?.name || session.user?.email}
                 </span>

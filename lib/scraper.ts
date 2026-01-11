@@ -162,3 +162,134 @@ export async function scrapeRecentMovies(): Promise<MovieData[]> {
     return []
   }
 }
+
+/**
+ * Scrapes movies by year from IMDb's advanced search
+ */
+export async function scrapeMoviesByYear(year: number, maxPages: number = 10): Promise<MovieData[]> {
+  const movies: MovieData[] = []
+  
+  try {
+    for (let page = 1; page <= maxPages; page++) {
+      try {
+        // IMDb advanced search URL for movies by year
+        const url = `https://www.imdb.com/search/title/?title_type=feature&release_date=${year}-01-01,${year}-12-31&sort=num_votes,desc&start=${(page - 1) * 50 + 1}`
+        
+        const response = await axios.get(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+          },
+          timeout: 30000,
+        })
+
+        const $ = cheerio.load(response.data)
+        
+        // Check if we've reached the end
+        const results = $('div.lister-item')
+        if (results.length === 0) {
+          console.log(`No more results for year ${year}, page ${page}`)
+          break
+        }
+
+        results.each((_, el) => {
+          try {
+            const titleElement = $(el).find('h3.lister-item-header a')
+            const title = titleElement.text().trim()
+            const href = titleElement.attr('href')
+            const imdbIdMatch = href?.match(/\/title\/(tt\d+)/)
+            const imdbId = imdbIdMatch ? imdbIdMatch[1] : undefined
+            
+            if (!title || !imdbId) return
+
+            // Extract year
+            const yearText = $(el).find('span.lister-item-year').text().trim()
+            const yearMatch = yearText.match(/(\d{4})/)
+            const releaseYear = yearMatch ? parseInt(yearMatch[1]) : year
+
+            // Extract poster
+            const posterUrl = $(el).find('img.loadlate').attr('loadlate') || 
+                             $(el).find('img').attr('src')
+
+            // Extract director
+            const director = $(el).find('p.text-muted a').first().text().trim()
+
+            // Extract genres
+            const genres: string[] = []
+            $(el).find('span.genre').text().split(',').forEach((g: string) => {
+              const genre = g.trim()
+              if (genre) genres.push(genre)
+            })
+
+            // Extract runtime
+            const runtimeText = $(el).find('span.runtime').text().trim()
+            const runtimeMatch = runtimeText.match(/(\d+)/)
+            const runtime = runtimeMatch ? parseInt(runtimeMatch[1]) : undefined
+
+            // Extract description
+            const description = $(el).find('p.text-muted').last().text().trim()
+
+            movies.push({
+              title,
+              imdbId,
+              releaseDate: new Date(releaseYear, 0, 1),
+              director,
+              description,
+              posterUrl,
+              genres,
+              runtime,
+            })
+          } catch (error) {
+            console.error('Error parsing movie item:', error)
+          }
+        })
+
+        console.log(`Scraped page ${page} for year ${year}: ${results.length} movies found`)
+        
+        // Add delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        
+      } catch (error: any) {
+        console.error(`Error scraping year ${year}, page ${page}:`, error.message)
+        // If we get rate limited or blocked, wait longer
+        if (error.response?.status === 429 || error.code === 'ECONNRESET') {
+          console.log('Rate limited, waiting 10 seconds...')
+          await new Promise(resolve => setTimeout(resolve, 10000))
+        } else {
+          break // Stop trying pages if there's a different error
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`Error scraping movies for year ${year}:`, error)
+  }
+
+  return movies
+}
+
+/**
+ * Scrapes movies from the last N years
+ */
+export async function scrapeMoviesLastNYears(years: number = 5): Promise<MovieData[]> {
+  const currentYear = new Date().getFullYear()
+  const startYear = currentYear - years
+  const allMovies: MovieData[] = []
+
+  console.log(`Starting to scrape movies from ${startYear} to ${currentYear}`)
+
+  for (let year = startYear; year <= currentYear; year++) {
+    console.log(`\n=== Scraping movies from year ${year} ===`)
+    const yearMovies = await scrapeMoviesByYear(year, 20) // Get up to 20 pages per year (1000 movies)
+    allMovies.push(...yearMovies)
+    console.log(`Found ${yearMovies.length} movies for year ${year}`)
+    
+    // Longer delay between years
+    if (year < currentYear) {
+      await new Promise(resolve => setTimeout(resolve, 5000))
+    }
+  }
+
+  console.log(`\nTotal movies scraped: ${allMovies.length}`)
+  return allMovies
+}
