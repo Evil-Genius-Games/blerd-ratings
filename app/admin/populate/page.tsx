@@ -5,12 +5,22 @@ import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { Navbar } from '@/components/Navbar'
 
+interface PopulateResult {
+  success: boolean
+  total?: number
+  saved?: number
+  skipped?: number
+  errors?: number
+  message?: string
+  error?: string
+}
+
 export default function PopulatePage() {
-  const { data: session, status } = useSession()
+  const { status } = useSession()
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState<string>('')
-  const [result, setResult] = useState<any>(null)
+  const [result, setResult] = useState<PopulateResult | null>(null)
   const [years, setYears] = useState(5)
 
   if (status === 'loading') {
@@ -56,10 +66,11 @@ export default function PopulatePage() {
         })
         setProgress('')
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to populate database'
       setResult({
         success: false,
-        error: error.message || 'Failed to populate database',
+        error: errorMessage,
       })
       setProgress('')
     } finally {

@@ -82,8 +82,9 @@ export async function POST(request: NextRequest) {
             })
 
             saved++
-          } catch (error: any) {
-            console.error(`Error saving ${movie.title}:`, error.message)
+          } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+            console.error(`Error saving ${movie.title}:`, errorMessage)
             errors++
           }
         })
@@ -106,12 +107,13 @@ export async function POST(request: NextRequest) {
       errors,
       message: `Successfully populated database with ${saved} movies from the last ${years} years`,
     })
-  } catch (error: any) {
-    console.error('Error populating database:', error)
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('Error populating database:', errorMessage)
     return NextResponse.json(
       { 
         error: 'Internal server error',
-        message: error.message 
+        message: errorMessage 
       },
       { status: 500 }
     )

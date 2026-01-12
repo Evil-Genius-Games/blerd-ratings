@@ -139,8 +139,9 @@ export async function scrapeIMDb(imdbId: string): Promise<MovieData | null> {
       cast,
       runtime,
     }
-  } catch (error: any) {
-    console.error(`Error scraping IMDb ${imdbId}:`, error.message)
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error(`Error scraping IMDb ${imdbId}:`, errorMessage)
     return null
   }
 }
@@ -176,6 +177,192 @@ export async function searchMovies(query: string, tmdbApiKey?: string): Promise<
 
   // Fallback: return empty array or implement alternative search
   return []
+}
+
+/**
+ * Fetches movies from TMDB API for a specific year
+ */
+export async function fetchMoviesFromTMDB(year: number, tmdbApiKey: string, maxPages: number = 20): Promise<MovieData[]> {
+  const movies: MovieData[] = []
+  
+  try {
+    for (let page = 1; page <= maxPages; page++) {
+      try {
+        const response = await axios.get('https://api.themoviedb.org/3/discover/movie', {
+          params: {
+            api_key: tmdbApiKey,
+            primary_release_year: year,
+            sort_by: 'popularity.desc',
+            page: page,
+            language: 'en-US',
+          },
+          timeout: 30000,
+        })
+
+        const results = response.data.results || []
+        
+        for (const movie of results) {
+          const movieData = movie as {
+            title: string
+            release_date?: string
+            overview?: string
+            poster_path?: string | null
+            id: number
+          }
+          movies.push({
+            title: movieData.title,
+            releaseDate: movieData.release_date ? new Date(movieData.release_date) : undefined,
+            description: movieData.overview || undefined,
+            posterUrl: movieData.poster_path 
+              ? `https://image.tmdb.org/t/p/w500${movieData.poster_path}` 
+              : undefined,
+            tmdbId: movieData.id,
+            genres: [], // Will be populated from movie details if needed
+          })
+        }
+
+        console.log(`  TMDB: Fetched page ${page}/${response.data.total_pages} for ${year} (${results.length} movies)`)
+        
+        // Stop if we've reached the last page
+        if (page >= response.data.total_pages) {
+          break
+        }
+        
+        // Rate limiting - TMDB allows 40 requests per 10 seconds
+        await new Promise(resolve => setTimeout(resolve, 250))
+        
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+        const isAxiosError = error && typeof error === 'object' && 'response' in error
+        const status = isAxiosError && typeof error.response === 'object' && error.response && 'status' in error.response ? error.response.status : undefined
+        
+        console.error(`Error fetching TMDB page ${page} for year ${year}:`, errorMessage)
+        if (status === 429) {
+          console.log('Rate limited, waiting 10 seconds...')
+          await new Promise(resolve => setTimeout(resolve, 10000))
+        } else {
+          break
+        }
+      }
+    }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error(`Error fetching movies from TMDB for year ${year}:`, errorMessage)
+  }
+
+  return movies
+}
+
+/**
+ * Gets IMDb ID from TMDB movie using the external_ids endpoint
+ */
+export async function getIMDbIdFromTMDB(tmdbId: number, tmdbApiKey: string): Promise<string | null> {
+  try {
+    const response = await axios.get(`https://api.themoviedb.org/3/movie/${tmdbId}/external_ids`, {
+      params: {
+        api_key: tmdbApiKey,
+      },
+      timeout: 10000,
+    })
+    
+    return response.data.imdb_id || null
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error(`Error getting IMDb ID for TMDB ${tmdbId}:`, errorMessage)
+    return null
+  }
+}
+
+/**
+ * Hybrid approach: Fetches movies from TMDB API, then enriches with IMDb data
+ */
+export async function scrapeMoviesLastNYearsHybrid(years: number = 5, tmdbApiKey: string, enrichWithIMDb: boolean = true): Promise<MovieData[]> {
+  const currentYear = new Date().getFullYear()
+  const startYear = currentYear - years
+  const allMovies: MovieData[] = []
+
+  console.log(`Starting hybrid scraping: TMDB API for bulk data + IMDb for enrichment`)
+  console.log(`Fetching movies from ${startYear} to ${currentYear}\n`)
+
+  // Step 1: Fetch bulk data from TMDB
+  for (let year = startYear; year <= currentYear; year++) {
+    console.log(`\n=== Fetching movies from year ${year} via TMDB API ===`)
+    const yearMovies = await fetchMoviesFromTMDB(year, tmdbApiKey, 20) // 20 pages = ~400 movies per year
+    allMovies.push(...yearMovies)
+    console.log(`Total movies fetched for ${year}: ${yearMovies.length}`)
+    
+    // Delay between years
+    if (year < currentYear) {
+      await new Promise(resolve => setTimeout(resolve, 1000))
+    }
+  }
+
+  console.log(`\n✅ Step 1 complete: Fetched ${allMovies.length} movies from TMDB`)
+  
+  if (!enrichWithIMDb) {
+    return allMovies
+  }
+
+  // Step 2: Enrich with IMDb data (posters, descriptions, cast)
+  console.log(`\n=== Step 2: Enriching with IMDb data (posters, descriptions, cast) ===`)
+  console.log(`This will take a while (${allMovies.length} movies)...\n`)
+
+  let enriched = 0
+  let failed = 0
+
+  for (let i = 0; i < allMovies.length; i++) {
+    const movie = allMovies[i]
+    
+    try {
+      // Get IMDb ID if we have TMDB ID
+      let imdbId: string | undefined = movie.imdbId
+      if (!imdbId && movie.tmdbId) {
+        const fetchedImdbId = await getIMDbIdFromTMDB(movie.tmdbId, tmdbApiKey)
+        imdbId = fetchedImdbId || undefined
+        await new Promise(resolve => setTimeout(resolve, 250)) // Rate limiting
+      }
+
+      if (imdbId) {
+        // Scrape IMDb for full details
+        const imdbData = await scrapeIMDb(imdbId)
+        
+        if (imdbData) {
+          // Merge data - prefer IMDb for poster, description, cast; keep TMDB for other fields
+          allMovies[i] = {
+            ...movie,
+            ...imdbData,
+            // Prefer IMDb data but keep TMDB if IMDb doesn't have it
+            posterUrl: imdbData.posterUrl || movie.posterUrl,
+            description: imdbData.description || movie.description,
+            cast: imdbData.cast && imdbData.cast.length > 0 ? imdbData.cast : movie.cast,
+            genres: imdbData.genres && imdbData.genres.length > 0 ? imdbData.genres : movie.genres,
+            director: imdbData.director || movie.director,
+            runtime: imdbData.runtime || movie.runtime,
+            imdbId: imdbId,
+          }
+          enriched++
+        }
+      }
+
+      // Progress update every 50 movies
+      if ((i + 1) % 50 === 0) {
+        console.log(`  Progress: ${i + 1}/${allMovies.length} movies enriched (${enriched} successful, ${failed} failed)`)
+      }
+
+      // Rate limiting for IMDb scraping
+      await new Promise(resolve => setTimeout(resolve, 1500))
+      
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      console.error(`  Error enriching movie ${movie.title}:`, errorMessage)
+      failed++
+    }
+  }
+
+  console.log(`\n✅ Step 2 complete: Enriched ${enriched}/${allMovies.length} movies with IMDb data`)
+  console.log(`Total movies ready: ${allMovies.length}`)
+
+  return allMovies
 }
 
 /**
@@ -338,10 +525,15 @@ export async function scrapeMoviesByYear(year: number, maxPages: number = 10): P
         // Add delay to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 2000))
         
-      } catch (error: any) {
-        console.error(`Error scraping year ${year}, page ${page}:`, error.message)
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+        const isAxiosError = error && typeof error === 'object' && 'response' in error
+        const status = isAxiosError && typeof error.response === 'object' && error.response && 'status' in error.response ? error.response.status : undefined
+        const errorCode = error instanceof Error && 'code' in error ? error.code : undefined
+        
+        console.error(`Error scraping year ${year}, page ${page}:`, errorMessage)
         // If we get rate limited or blocked, wait longer
-        if (error.response?.status === 429 || error.code === 'ECONNRESET') {
+        if (status === 429 || errorCode === 'ECONNRESET') {
           console.log('Rate limited, waiting 10 seconds...')
           await new Promise(resolve => setTimeout(resolve, 10000))
         } else {
@@ -361,72 +553,14 @@ export async function scrapeMoviesByYear(year: number, maxPages: number = 10): P
 }
 
 /**
- * Scrapes movies from the last N years using TMDB API (more reliable than scraping)
- * Falls back to IMDb scraping if TMDB API key is not available
+ * Legacy function for backwards compatibility - uses hybrid approach if TMDB key available
  */
 export async function scrapeMoviesLastNYears(years: number = 5, tmdbApiKey?: string): Promise<MovieData[]> {
-  const currentYear = new Date().getFullYear()
-  const startYear = currentYear - years
-  const allMovies: MovieData[] = []
-
-  console.log(`Starting to scrape movies from ${startYear} to ${currentYear}`)
-
-  // If TMDB API key is available, use it (much more reliable)
   if (tmdbApiKey) {
-    console.log('Using TMDB API for movie data...')
-    for (let year = startYear; year <= currentYear; year++) {
-      console.log(`\n=== Fetching movies from year ${year} via TMDB ===`)
-      try {
-        // Get popular movies for the year
-        for (let page = 1; page <= 10; page++) {
-          const response = await axios.get('https://api.themoviedb.org/3/discover/movie', {
-            params: {
-              api_key: tmdbApiKey,
-              primary_release_year: year,
-              sort_by: 'popularity.desc',
-              page: page,
-            },
-          })
-
-          const movies = response.data.results.map((movie: any) => ({
-            title: movie.title,
-            releaseDate: movie.release_date ? new Date(movie.release_date) : undefined,
-            description: movie.overview,
-            posterUrl: movie.poster_path 
-              ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` 
-              : undefined,
-            tmdbId: movie.id,
-            genres: [], // Will be enriched later
-          }))
-
-          allMovies.push(...movies)
-          console.log(`Fetched ${movies.length} movies from TMDB for ${year}, page ${page}`)
-          
-          if (page >= response.data.total_pages) break
-          
-          // Rate limiting
-          await new Promise(resolve => setTimeout(resolve, 250))
-        }
-      } catch (error: any) {
-        console.error(`Error fetching from TMDB for year ${year}:`, error.message)
-      }
-    }
-  } else {
-    // Fallback to IMDb scraping
-    console.log('TMDB API key not found, using IMDb scraping (may be slower/less reliable)...')
-    for (let year = startYear; year <= currentYear; year++) {
-      console.log(`\n=== Scraping movies from year ${year} ===`)
-      const yearMovies = await scrapeMoviesByYear(year, 5) // Reduced pages for reliability
-      allMovies.push(...yearMovies)
-      console.log(`Found ${yearMovies.length} movies for year ${year}`)
-      
-      // Longer delay between years
-      if (year < currentYear) {
-        await new Promise(resolve => setTimeout(resolve, 5000))
-      }
-    }
+    return scrapeMoviesLastNYearsHybrid(years, tmdbApiKey, true)
   }
-
-  console.log(`\nTotal movies found: ${allMovies.length}`)
-  return allMovies
+  
+  // Fallback: return empty array if no API key
+  console.log('TMDB API key required for bulk scraping')
+  return []
 }

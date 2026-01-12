@@ -28,8 +28,9 @@ async function checkCount() {
     }
 
     await prisma.$disconnect()
-  } catch (error: any) {
-    console.error('Error:', error.message)
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('Error:', errorMessage)
     process.exit(1)
   }
 }

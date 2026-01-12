@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const where: any = { userId }
+    const where: { userId: string; movieId?: string } = { userId }
     if (movieId) {
       where.movieId = movieId
     }

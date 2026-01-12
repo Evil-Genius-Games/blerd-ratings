@@ -60,7 +60,8 @@ export default function MovieDetailPage() {
     if (session?.user?.id) {
       fetchUserRating()
     }
-  }, [movieId, session])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [movieId, session?.user?.id])
 
   const fetchMovie = async () => {
     try {

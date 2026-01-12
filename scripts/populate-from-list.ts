@@ -77,7 +77,7 @@ async function populateFromList() {
       console.log(`    - Description: ${movieData.description ? 'Yes (' + movieData.description.substring(0, 50) + '...)' : 'No'}`)
       console.log(`    - Cast: ${movieData.cast ? movieData.cast.length + ' actors' : 'No'}`)
 
-      const savedMovie = await prisma.movie.upsert({
+        await prisma.movie.upsert({
         where: { imdbId },
         update: {
           title: movieData.title,
@@ -111,8 +111,9 @@ async function populateFromList() {
       // Rate limiting - wait between requests
       await new Promise(resolve => setTimeout(resolve, 2000))
       
-    } catch (error: any) {
-      console.error(`  ❌ Error processing ${imdbId}:`, error.message)
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      console.error(`  ❌ Error processing ${imdbId}:`, errorMessage)
       errors++
     }
   }

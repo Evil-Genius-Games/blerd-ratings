@@ -22,12 +22,27 @@ interface Movie {
 }
 
 export default function MoviesPage() {
-  const { data: session, status } = useSession()
+  const { status } = useSession()
   const router = useRouter()
   const [movies, setMovies] = useState<Movie[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [scraping, setScraping] = useState(false)
+
+  const fetchMovies = async () => {
+    try {
+      const url = search
+        ? `/api/movies?search=${encodeURIComponent(search)}`
+        : '/api/movies'
+      const response = await fetch(url)
+      const data = await response.json()
+      setMovies(data.movies || [])
+    } catch (error) {
+      console.error('Error fetching movies:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -37,6 +52,7 @@ export default function MoviesPage() {
     if (status === 'authenticated') {
       fetchMovies()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, router])
 
   const fetchMovies = async () => {

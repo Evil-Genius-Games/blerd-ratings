@@ -37,10 +37,14 @@ export async function GET(request: NextRequest) {
     ])
 
     // Calculate average ratings for each movie
-    const moviesWithRatings = movies.map((movie: {
-      ratings: Array<{ diversityScore: number; inclusionScore: number; overallScore: number }>
-      [key: string]: any
-    }) => {
+    const moviesWithRatings =       movies.map((movie: {
+        id: string
+        title: string
+        releaseDate: Date | null
+        director: string | null
+        posterUrl: string | null
+        ratings: Array<{ diversityScore: number; inclusionScore: number; overallScore: number }>
+      }) => {
       const avgDiversity = movie.ratings.length > 0
         ? movie.ratings.reduce((sum: number, r: { diversityScore: number }) => sum + r.diversityScore, 0) / movie.ratings.length
         : null

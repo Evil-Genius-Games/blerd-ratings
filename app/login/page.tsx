@@ -31,7 +31,7 @@ export default function LoginPage() {
         router.push('/movies')
         router.refresh()
       }
-    } catch (err) {
+    } catch {
       setError('An error occurred. Please try again.')
     } finally {
       setLoading(false)
@@ -104,7 +104,7 @@ export default function LoginPage() {
               </div>
 
               <div className="text-center text-sm">
-                <span className="text-gray-600 dark:text-gray-400">Don't have an account? </span>
+                <span className="text-gray-600 dark:text-gray-400">Don&apos;t have an account? </span>
                 <Link href="/register" className="font-medium text-purple-600 hover:text-purple-500">
                   Sign up
                 </Link>

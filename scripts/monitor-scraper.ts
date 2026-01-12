@@ -80,7 +80,7 @@ async function monitorDatabase() {
         if (progressLine) {
           console.log(`   📝 Scraper: ${progressLine.trim()}`)
         }
-      } catch (e) {
+      } catch {
         // Log file might not exist yet
       }
 
@@ -99,8 +99,9 @@ async function monitorDatabase() {
         await prisma.$disconnect()
         process.exit(0)
       }
-    } catch (error: any) {
-      console.error('❌ Error checking database:', error.message)
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      console.error('❌ Error checking database:', errorMessage)
     }
   }
 
