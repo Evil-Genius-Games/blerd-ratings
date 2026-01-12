@@ -146,8 +146,8 @@ export default function PopulatePage() {
                     <div className="mt-4 space-y-1 text-sm text-green-600 dark:text-green-400">
                       <p>Total movies found: {result.total}</p>
                       <p>Successfully saved: {result.saved}</p>
-                      {result.skipped > 0 && <p>Skipped: {result.skipped}</p>}
-                      {result.errors > 0 && <p>Errors: {result.errors}</p>}
+                      {result.skipped && result.skipped > 0 && <p>Skipped: {result.skipped}</p>}
+                      {result.errors && result.errors > 0 && <p>Errors: {result.errors}</p>}
                     </div>
                   )}
                 </div>

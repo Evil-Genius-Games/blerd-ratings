@@ -55,21 +55,6 @@ export default function MoviesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, router])
 
-  const fetchMovies = async () => {
-    try {
-      const url = search
-        ? `/api/movies?search=${encodeURIComponent(search)}`
-        : '/api/movies'
-      const response = await fetch(url)
-      const data = await response.json()
-      setMovies(data.movies || [])
-    } catch (error) {
-      console.error('Error fetching movies:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const handleScrapeRecent = async () => {
     setScraping(true)
     try {
