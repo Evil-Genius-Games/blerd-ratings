@@ -160,7 +160,15 @@ export async function searchMovies(query: string, tmdbApiKey?: string): Promise<
         }
       })
 
-      return response.data.results.map((movie: any) => ({
+      interface TMDBMovieResult {
+        title: string
+        release_date?: string
+        overview?: string
+        poster_path?: string | null
+        id: number
+      }
+      
+      return (response.data.results as TMDBMovieResult[]).map((movie) => ({
         title: movie.title,
         releaseDate: movie.release_date ? new Date(movie.release_date) : undefined,
         description: movie.overview,
@@ -419,7 +427,7 @@ export async function scrapeRecentMovies(): Promise<MovieData[]> {
  */
 export async function scrapeMoviesByYear(year: number, maxPages: number = 10): Promise<MovieData[]> {
   const movies: MovieData[] = []
-  let browser: any = null
+  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
   
   try {
     // Launch browser for JavaScript-rendered pages
